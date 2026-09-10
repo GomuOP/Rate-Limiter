@@ -1,0 +1,10 @@
+// Generated from src/redis/token_bucket.lua at configure time. Do not edit.
+#pragma once
+
+namespace rl::redis {
+
+inline constexpr const char* kTokenBucketLua = R"RL_LUA(
+@RL_LUA_SCRIPT@
+)RL_LUA";
+
+} // namespace rl::redis
