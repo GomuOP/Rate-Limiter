@@ -124,9 +124,17 @@ redis-server --port 6379 &
 
 | route | method | response |
 |---|---|---|
+| `/` , `/dashboard` | GET | a self-contained HTML status page (see below) |
 | `/check` | GET, HEAD | `200` / `429` + JSON `{allowed, limit, remaining, reset_ms[, retry_after_ms]}`; headers `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` (seconds) on `429` |
 | `/healthz` | GET | `200 ok` |
 | `/stats` | GET | JSON counters: requests, allowed, denied, bad_requests, conns, key_count, evictions, sweeps_removed, redis_errors, redis_failopen/failclosed, uptime_ms |
+
+### Status page
+
+Open `http://<host>:<port>/` in a browser. It is served straight from the
+`ratelimiter` process (no framework, no external requests), polls `/stats` once
+a second, shows the live counters and a derived requests/sec, and has a small
+form to fire `/check?key=` calls so you can watch `200` turn into `429`.
 
 Key source is configurable (`key_extractor.source`): `query` (`?key=`),
 `header` (a named header), or `ip` (peer address, or the left-most

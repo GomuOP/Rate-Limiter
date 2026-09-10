@@ -273,6 +273,24 @@ Status: agreed 2026-09-10.
     are what a caller needs to backoff intelligently; omitting them pushes
     every caller to guess.
 
+### 0.18 Built-in status page
+
+- **Decision** — `GET /` serves a single self-contained HTML page (inline CSS
+  and JS, no external requests) straight from the `ratelimiter` process. It
+  polls `/stats` once a second, renders the counters and a derived
+  requests/sec, and has a small form that fires `/check?key=` from the browser
+  so a human can watch `200` flip to `429`. Same origin as the API, so no CORS
+  and no second server. The HTML is embedded as a raw string literal at
+  configure time (same mechanism as the Lua script).
+- **Rejected**
+  - *A separate static file served by nginx / `python -m http.server`* — needs
+    CORS headers on the limiter and a second process to run.
+  - *The original Phase 8 Next.js dashboard* — a Node/npm toolchain and a
+    build step for what ~200 lines of dependency-free HTML cover here.
+  - *WebSocket push (original Phase 7)* — 1s polling of `/stats` is enough for
+    a person watching counters; a push channel is a real feature but not
+    needed to see the limiter working. Left as a possible extension.
+
 ---
 
 ## Open questions carried into later phases

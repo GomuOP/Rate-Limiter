@@ -1,0 +1,10 @@
+// Generated from src/http/dashboard.html at configure time. Do not edit.
+#pragma once
+
+namespace rl::http {
+
+inline constexpr const char* kDashboardHtml = R"RL_DASH(
+@RL_DASHBOARD_HTML@
+)RL_DASH";
+
+} // namespace rl::http

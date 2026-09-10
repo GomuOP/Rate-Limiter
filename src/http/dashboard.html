@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ratelimiter</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: #f6f7f9; color: #1c2024;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: #6b7280; margin-bottom: 20px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c0392b; margin-right: 6px; vertical-align: middle; }
+  .dot.ok { background: #27ae60; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; }
+  .card .label { color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .value { font-size: 22px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .card.hi { border-color: #93c5fd; background: #eff6ff; }
+  .card.warn .value { color: #c0392b; }
+  .bar { height: 10px; border-radius: 5px; background: #e5e7eb; overflow: hidden; margin: 18px 0 24px; display: flex; }
+  .bar > span { display: block; height: 100%; }
+  .bar .allow { background: #27ae60; }
+  .bar .deny { background: #c0392b; }
+  section { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-top: 8px; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, button { font: inherit; padding: 7px 12px; border-radius: 6px; border: 1px solid #d1d5db; }
+  input { flex: 1 1 160px; min-width: 120px; }
+  button { background: #1c2024; color: #fff; border-color: #1c2024; cursor: pointer; }
+  button.ghost { background: #fff; color: #1c2024; }
+  button:active { transform: translateY(1px); }
+  .result { margin-top: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+  .pill.p200 { background: #dcfce7; color: #166534; }
+  .pill.p429 { background: #fee2e2; color: #991b1b; }
+  .pill.pother { background: #e5e7eb; color: #374151; }
+  .muted { color: #9ca3af; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span id="dot" class="dot"></span>ratelimiter</h1>
+  <div class="sub" id="sub">connecting&hellip;</div>
+
+  <div class="bar" title="allowed vs denied (all time)">
+    <span class="allow" id="barAllow" style="width:0%"></span>
+    <span class="deny" id="barDeny" style="width:0%"></span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section>
+    <h2>fire a /check</h2>
+    <div class="row">
+      <input id="key" value="alice" spellcheck="false" aria-label="rate-limit key">
+      <button id="one">Send /check</button>
+      <button id="many" class="ghost">Send &times;20</button>
+    </div>
+    <div class="result muted" id="out">no request sent yet</div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var FIELDS = [
+    ["reqPerSec", "req/sec", true],
+    ["allowRate", "allow %", true],
+    ["requests", "requests", false],
+    ["checks", "checks", false],
+    ["allowed", "allowed", false],
+    ["denied", "denied", false],
+    ["key_count", "keys tracked", false],
+    ["bad_requests", "400s", false],
+    ["not_found", "404s", false],
+    ["conns_accepted", "conns accepted", false],
+    ["conns_closed", "conns closed", false],
+    ["evictions", "evictions", false],
+    ["sweeps_removed", "swept idle", false],
+    ["redis_errors", "redis errors", false],
+    ["redis_failopen", "redis fail-open", false],
+    ["redis_failclosed", "redis fail-closed", false],
+    ["uptime", "uptime", true]
+  ];
+
+  var grid = document.getElementById("grid");
+  var cells = {};
+  FIELDS.forEach(function (f) {
+    var card = document.createElement("div");
+    card.className = "card" + (f[2] ? " hi" : "");
+    card.innerHTML = '<div class="label"></div><div class="value">&ndash;</div>';
+    card.querySelector(".label").textContent = f[1];
+    grid.appendChild(card);
+    cells[f[0]] = card;
+  });
+
+  var prev = null, prevAt = 0;
+
+  function fmt(n) { return (n == null) ? "-" : n.toLocaleString(); }
+  function dur(ms) {
+    var s = Math.floor(ms / 1000);
+    var h = Math.floor(s / 3600); s -= h * 3600;
+    var m = Math.floor(s / 60); s -= m * 60;
+    return (h ? h + "h " : "") + (h || m ? m + "m " : "") + s + "s";
+  }
+
+  function render(d) {
+    var now = Date.now();
+    var rps = "-";
+    if (prev && now > prevAt) {
+      rps = Math.max(0, Math.round((d.requests - prev.requests) * 1000 / (now - prevAt)));
+    }
+    var allowPct = d.checks ? (100 * d.allowed / d.checks) : 0;
+
+    setVal("reqPerSec", rps === "-" ? "-" : fmt(rps));
+    setVal("allowRate", d.checks ? allowPct.toFixed(1) + "%" : "-");
+    setVal("uptime", dur(d.uptime_ms));
+    FIELDS.forEach(function (f) {
+      if (["reqPerSec", "allowRate", "uptime"].indexOf(f[0]) >= 0) return;
+      setVal(f[0], fmt(d[f[0]]));
+    });
+    cells.denied.classList.toggle("warn", d.denied > 0);
+    cells.redis_errors.classList.toggle("warn", d.redis_errors > 0);
+
+    var total = d.allowed + d.denied || 1;
+    document.getElementById("barAllow").style.width = (100 * d.allowed / total) + "%";
+    document.getElementById("barDeny").style.width = (100 * d.denied / total) + "%";
+
+    prev = d; prevAt = now;
+  }
+  function setVal(k, v) { cells[k].querySelector(".value").textContent = v; }
+
+  function connected(ok) {
+    document.getElementById("dot").className = "dot" + (ok ? " ok" : "");
+    document.getElementById("sub").textContent = ok
+      ? "live — polling /stats every second"
+      : "disconnected — is the server running?";
+  }
+
+  function poll() {
+    fetch("/stats", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { connected(true); render(d); })
+      .catch(function () { connected(false); });
+  }
+  poll();
+  setInterval(poll, 1000);
+
+  // ---- test panel ----
+  var out = document.getElementById("out");
+  function pill(code) {
+    var cls = code === 200 ? "p200" : code === 429 ? "p429" : "pother";
+    return '<span class="pill ' + cls + '">' + code + "</span>";
+  }
+  function send(n) {
+    var key = encodeURIComponent(document.getElementById("key").value || "alice");
+    var codes = {};
+    var last = null;
+    var chain = Promise.resolve();
+    for (var i = 0; i < n; i++) {
+      chain = chain.then(function () {
+        return fetch("/check?key=" + key, { cache: "no-store" }).then(function (r) {
+          codes[r.status] = (codes[r.status] || 0) + 1;
+          return r.text().then(function (t) { last = { s: r.status, b: t }; });
+        });
+      });
+    }
+    chain.then(function () {
+      out.classList.remove("muted");
+      var summary = Object.keys(codes).sort().map(function (c) {
+        return pill(parseInt(c, 10)) + " &times;" + codes[c];
+      }).join("  ");
+      out.innerHTML = summary + "\n" + (last ? last.b : "");
+      poll();
+    });
+  }
+  document.getElementById("one").addEventListener("click", function () { send(1); });
+  document.getElementById("many").addEventListener("click", function () { send(20); });
+  document.getElementById("key").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") send(1);
+  });
+})();
+</script>
+</body>
+</html>

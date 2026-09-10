@@ -28,6 +28,10 @@ struct Response {
         add_header("Content-Type", "application/json");
         body = j.dump();
     }
+    void set_html(std::string s) {
+        add_header("Content-Type", "text/html; charset=utf-8");
+        body = std::move(s);
+    }
 
     static const char* reason_phrase(int code);
     std::string serialize() const;

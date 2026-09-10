@@ -98,12 +98,19 @@ target_link_libraries(rl_core
     PUBLIC  nlohmann_json::nlohmann_json
     PRIVATE rl_warnings ${RL_HIREDIS})
 
-# embed the Lua script as a raw string literal at configure time
+# embed the Lua script and the status page as raw string literals at configure time
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/redis/token_bucket.lua" RL_LUA_SCRIPT)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/redis/lua_script.inc.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/rl/lua_script.inc"
     @ONLY)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/http/dashboard.html" RL_DASHBOARD_HTML)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/http/dashboard.inc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/rl/dashboard.inc"
+    @ONLY)
+
 target_include_directories(rl_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 # --- executable ----------------------------------------------------------------

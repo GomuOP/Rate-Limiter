@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "rl/dashboard.inc" // provides rl::http::kDashboardHtml
+
 namespace rl::http {
 
 namespace {
@@ -43,6 +45,12 @@ void Server::on_accept(net::Fd fd, std::string peer_ip) {
 
 void Server::handle(const Request& req, Response& resp) {
     ++stats_.requests;
+
+    if (req.path == "/" || req.path == "/dashboard") {
+        resp.set_status(200);
+        resp.set_html(kDashboardHtml);
+        return;
+    }
 
     if (req.path == "/check") {
         if (req.method != "GET" && req.method != "HEAD") {
