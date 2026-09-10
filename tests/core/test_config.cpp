@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+
 #include <nlohmann/json.hpp>
 
 #include "core/config.hpp"
@@ -55,4 +57,33 @@ TEST_CASE("config: validation rejects nonsensical values") {
     CHECK_THROWS(Config::from_json(json{{"limiter", {{"algo", "token_bucket"}, {"burst", 0}}}}));
     CHECK_THROWS(Config::from_json(json{{"limiter", {{"algo", "sliding_window"}, {"limit", 0}}}}));
     CHECK_THROWS(Config::from_json(json{{"server", {{"port", 0}}}}));
+}
+
+TEST_CASE("config: LimiterConfig::validate checks only the active algo's fields") {
+    LimiterConfig lc; // token_bucket defaults
+    CHECK_NOTHROW(lc.validate());
+
+    // A bad sliding-window field is ignored while token_bucket is active.
+    lc.limit = 0;
+    lc.window = std::chrono::milliseconds{0};
+    CHECK_NOTHROW(lc.validate());
+
+    lc.rate = 0.0;
+    CHECK_THROWS(lc.validate());
+
+    lc = LimiterConfig{};
+    lc.burst = 0;
+    CHECK_THROWS(lc.validate());
+
+    lc = LimiterConfig{};
+    lc.algo = LimiterConfig::Algo::sliding_window;
+    lc.rate = -1.0; // ignored now
+    CHECK_NOTHROW(lc.validate());
+    lc.limit = 0;
+    CHECK_THROWS(lc.validate());
+
+    lc = LimiterConfig{};
+    lc.algo = LimiterConfig::Algo::sliding_window;
+    lc.window = std::chrono::milliseconds{0};
+    CHECK_THROWS(lc.validate());
 }

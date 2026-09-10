@@ -87,6 +87,7 @@ add_library(rl_core STATIC
     src/net/connection.cpp
     src/http/request_parser.cpp
     src/http/response.cpp
+    src/http/query.cpp
     src/http/server.cpp
     src/redis/redis_client.cpp
     src/redis/redis_rate_limiter.cpp
@@ -132,6 +133,7 @@ if(RL_BUILD_TESTS)
         tests/limit/test_key_store.cpp
         tests/limit/test_key_extractor.cpp
         tests/http/test_request_parser.cpp
+        tests/http/test_query.cpp
         tests/core/test_config.cpp
     )
     target_link_libraries(rl_tests PRIVATE rl_core rl_warnings Catch2::Catch2WithMain)

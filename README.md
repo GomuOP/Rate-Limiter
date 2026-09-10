@@ -127,14 +127,25 @@ redis-server --port 6379 &
 | `/` , `/dashboard` | GET | a self-contained HTML status page (see below) |
 | `/check` | GET, HEAD | `200` / `429` + JSON `{allowed, limit, remaining, reset_ms[, retry_after_ms]}`; headers `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` (seconds) on `429` |
 | `/healthz` | GET | `200 ok` |
-| `/stats` | GET | JSON counters: requests, allowed, denied, bad_requests, conns, key_count, evictions, sweeps_removed, redis_errors, redis_failopen/failclosed, uptime_ms |
+| `/stats` | GET | JSON counters: requests, allowed, denied, bad_requests, config_changes, conns, key_count, evictions, sweeps_removed, redis_errors, redis_failopen/failclosed, uptime_ms |
+| `/config` | GET | JSON of the limiter config in effect: `{algo, rate, burst, limit, window_ms}` |
+| `/config` | POST | change the limiter live (local mode only). Params in the **query string**: `algo`, `rate`, `burst`, `limit`, `window_ms` — any subset; omitted fields keep their current value. `200` + the new config on success, `400` on a bad/out-of-range value, `409` in `redis` mode |
 
 ### Status page
 
 Open `http://<host>:<port>/` in a browser. It is served straight from the
 `ratelimiter` process (no framework, no external requests), polls `/stats` once
-a second, shows the live counters and a derived requests/sec, and has a small
-form to fire `/check?key=` calls so you can watch `200` turn into `429`.
+a second, shows the live counters and a derived requests/sec, has a small
+form to fire `/check?key=` calls so you can watch `200` turn into `429`, and a
+panel that switches the algorithm and its parameters live via `POST /config`.
+
+`POST /config` rebuilds the limiter from an empty key store, so existing
+buckets/windows are cleared; the `/stats` counters keep running. Example:
+
+```
+curl -X POST 'http://127.0.0.1:8080/config?algo=sliding_window&limit=10&window_ms=10000'
+curl -X POST 'http://127.0.0.1:8080/config?algo=token_bucket&rate=1&burst=5'
+```
 
 Key source is configurable (`key_extractor.source`): `query` (`?key=`),
 `header` (a named header), or `ip` (peer address, or the left-most

@@ -291,6 +291,51 @@ Status: agreed 2026-09-10.
     a person watching counters; a push channel is a real feature but not
     needed to see the limiter working. Left as a possible extension.
 
+### 0.19 Live limiter reconfiguration (`/config`)
+
+- **Decision** — `GET /config` returns the limiter config in effect;
+  `POST /config` merges the given fields (`algo`, `rate`, `burst`, `limit`,
+  `window_ms`) onto it, rebuilds the limiter, and swaps it in without
+  restarting the process. The dashboard gets a panel for this so the
+  algorithm can be switched from a browser.
+  - **Parameters go in the query string, not a request body.** The HTTP
+    parser deliberately does not expose bodies (0.17 scope constraint:
+    `/check` is a GET, bodies are drained and ignored). Rather than add body
+    buffering for one endpoint, `/config` takes `?algo=…&rate=…` like
+    `/check` does. `POST` (not `GET`) because it mutates.
+  - **The server owns the limiter behind a `unique_ptr` and holds a
+    `LimiterFactory`** (`std::function<unique_ptr<RateLimiter>(const
+    LimiterConfig&)>`) supplied by `main()`. `main()` already had the
+    algorithm/clock/mode switch; it is now a lambda the server can call
+    again. Keeps `Server` ignorant of concrete limiter types and of the
+    clock's lifetime.
+  - **A swap installs a fresh key store** — existing buckets/windows are
+    dropped. Carrying counts across a change of algorithm or capacity has no
+    single sensible meaning (what is a half-full 200-token bucket after
+    `burst` drops to 5?); "reconfigure = reset" is the predictable rule. The
+    `/stats` counters are process-wide and keep running; a `config_changes`
+    counter is added.
+  - **Local mode only.** In `redis` mode the limiter is the Lua token bucket
+    keyed by `rate`/`burst`, and a swap would mean tearing down and
+    reconnecting the hiredis client mid-flight for little demo value.
+    `POST /config` returns `409` when `mode != local`.
+  - **Validation reuses `LimiterConfig::validate()`**, factored out of
+    `Config::validate()` so the endpoint and startup enforce the same bounds
+    (`rate > 0`, `burst >= 1`, `limit >= 1`, `window_ms > 0` for the active
+    algo). Bad input → `400` with the message; the running limiter is
+    untouched until the new one is built and validated.
+- **Rejected**
+  - *JSON body on `POST /config`* — needs body buffering in the parser and
+    connection layer for a single non-hot-path route; the query string
+    already carries five scalars fine.
+  - *SIGHUP + re-read the config file* — no browser story, and it reloads
+    server/redis/key-store settings that cannot safely change at runtime.
+  - *Keeping the key store across a swap* — see above; undefined semantics
+    when capacity or algorithm changes.
+  - *Supporting the swap in `redis` mode* — possible (rebuild the
+    `RedisRateLimiter`), but the reconnect churn is not worth it for what is
+    a local demo affordance. Noted as an extension.
+
 ---
 
 ## Open questions carried into later phases

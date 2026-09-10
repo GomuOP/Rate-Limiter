@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "core/clock.hpp"
 #include "core/config.hpp"
@@ -49,23 +50,25 @@ void apply_hostport(std::string_view hp, std::string& host, std::uint16_t& port)
     port = static_cast<std::uint16_t>(std::stoi(std::string(p)));
 }
 
-std::unique_ptr<rl::limit::RateLimiter>
-make_limiter(const rl::core::Config& cfg, const rl::core::Clock& clock, rl::core::Stats& stats) {
+// Build a limiter for `lc`, taking non-algorithm settings (mode, key-store
+// bounds, redis endpoint) from `base`. Called once at startup and again by the
+// server for every accepted POST /config (design 0.19).
+std::unique_ptr<rl::limit::RateLimiter> make_limiter(const rl::core::Config& base,
+                                                     const rl::core::LimiterConfig& lc,
+                                                     const rl::core::Clock& clock,
+                                                     rl::core::Stats& stats) {
     using rl::core::Config;
     using rl::core::LimiterConfig;
 
-    if (cfg.mode == Config::Mode::redis) {
-        return std::make_unique<rl::redis::RedisRateLimiter>(cfg.redis, cfg.limiter.rate,
-                                                             cfg.limiter.burst, stats);
+    if (base.mode == Config::Mode::redis) {
+        return std::make_unique<rl::redis::RedisRateLimiter>(base.redis, lc.rate, lc.burst, stats);
     }
-    if (cfg.limiter.algo == LimiterConfig::Algo::token_bucket) {
-        return std::make_unique<rl::limit::TokenBucketLimiter>(cfg.limiter.rate, cfg.limiter.burst,
-                                                               clock, cfg.key_store.max_keys,
-                                                               cfg.key_store.idle_ttl);
+    if (lc.algo == LimiterConfig::Algo::token_bucket) {
+        return std::make_unique<rl::limit::TokenBucketLimiter>(
+            lc.rate, lc.burst, clock, base.key_store.max_keys, base.key_store.idle_ttl);
     }
-    return std::make_unique<rl::limit::SlidingWindowLimiter>(cfg.limiter.limit, cfg.limiter.window,
-                                                             clock, cfg.key_store.max_keys,
-                                                             cfg.key_store.idle_ttl);
+    return std::make_unique<rl::limit::SlidingWindowLimiter>(
+        lc.limit, lc.window, clock, base.key_store.max_keys, base.key_store.idle_ttl);
 }
 
 } // namespace
@@ -124,12 +127,16 @@ int main(int argc, char** argv) {
 
     rl::core::SystemClock clock;
     rl::core::Stats stats;
-    auto limiter = make_limiter(cfg, clock, stats);
+    rl::http::LimiterFactory limiter_factory = [&cfg, &clock,
+                                                &stats](const rl::core::LimiterConfig& lc) {
+        return make_limiter(cfg, lc, clock, stats);
+    };
+    auto limiter = limiter_factory(cfg.limiter);
 
     std::signal(SIGPIPE, SIG_IGN);
 
     try {
-        rl::http::Server server(cfg, *limiter, stats);
+        rl::http::Server server(cfg, std::move(limiter), limiter_factory, stats);
         g_server = &server;
         std::signal(SIGINT, on_signal);
         std::signal(SIGTERM, on_signal);

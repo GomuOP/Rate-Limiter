@@ -27,6 +27,11 @@ struct LimiterConfig {
     // sliding window
     std::int64_t limit = 100; // max requests per window
     std::chrono::milliseconds window{1000};
+
+    /// Throws std::runtime_error when the fields for the selected algo are
+    /// out of range. Shared by startup config validation and the live
+    /// /config endpoint.
+    void validate() const;
 };
 
 struct KeyStoreConfig {

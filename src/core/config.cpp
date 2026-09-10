@@ -127,6 +127,24 @@ Config Config::from_json_file(const std::string& path) {
     return from_json(j);
 }
 
+void LimiterConfig::validate() const {
+    if (algo == Algo::token_bucket) {
+        if (!(rate > 0.0)) {
+            throw std::runtime_error("limiter.rate must be > 0");
+        }
+        if (burst < 1) {
+            throw std::runtime_error("limiter.burst must be >= 1");
+        }
+    } else {
+        if (limit < 1) {
+            throw std::runtime_error("limiter.limit must be >= 1");
+        }
+        if (window.count() <= 0) {
+            throw std::runtime_error("limiter.window_ms must be > 0");
+        }
+    }
+}
+
 void Config::validate() const {
     if (server.port == 0) {
         throw std::runtime_error("server.port must be non-zero");
@@ -134,21 +152,7 @@ void Config::validate() const {
     if (server.max_header_bytes < 256) {
         throw std::runtime_error("server.max_header_bytes must be >= 256");
     }
-    if (limiter.algo == LimiterConfig::Algo::token_bucket) {
-        if (!(limiter.rate > 0.0)) {
-            throw std::runtime_error("limiter.rate must be > 0");
-        }
-        if (limiter.burst < 1) {
-            throw std::runtime_error("limiter.burst must be >= 1");
-        }
-    } else {
-        if (limiter.limit < 1) {
-            throw std::runtime_error("limiter.limit must be >= 1");
-        }
-        if (limiter.window.count() <= 0) {
-            throw std::runtime_error("limiter.window_ms must be > 0");
-        }
-    }
+    limiter.validate();
     if (key_store.max_keys < 1) {
         throw std::runtime_error("key_store.max_keys must be >= 1");
     }

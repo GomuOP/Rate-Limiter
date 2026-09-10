@@ -29,8 +29,12 @@
   section { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-top: 8px; }
   section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 0 0 12px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  input, button { font: inherit; padding: 7px 12px; border-radius: 6px; border: 1px solid #d1d5db; }
+  .row + .row { margin-top: 8px; }
+  input, button, select { font: inherit; padding: 7px 12px; border-radius: 6px; border: 1px solid #d1d5db; }
   input { flex: 1 1 160px; min-width: 120px; }
+  select { background: #fff; }
+  label.field { flex: 1 1 160px; min-width: 120px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #6b7280; }
+  label.field input { flex: none; width: 100%; }
   button { background: #1c2024; color: #fff; border-color: #1c2024; cursor: pointer; }
   button.ghost { background: #fff; color: #1c2024; }
   button:active { transform: translateY(1px); }
@@ -55,6 +59,28 @@
   <div class="grid" id="grid"></div>
 
   <section>
+    <h2>limiter config</h2>
+    <div class="row">
+      <select id="algo" aria-label="algorithm">
+        <option value="token_bucket">token bucket</option>
+        <option value="sliding_window">sliding window</option>
+      </select>
+    </div>
+    <div class="row" id="tbRow">
+      <label class="field">rate / sec<input id="rate" type="number" step="any" min="0" spellcheck="false"></label>
+      <label class="field">burst<input id="burst" type="number" step="1" min="1" spellcheck="false"></label>
+    </div>
+    <div class="row" id="swRow">
+      <label class="field">limit<input id="limit" type="number" step="1" min="1" spellcheck="false"></label>
+      <label class="field">window ms<input id="window_ms" type="number" step="1" min="1" spellcheck="false"></label>
+    </div>
+    <div class="row">
+      <button id="apply">Apply</button>
+    </div>
+    <div class="result muted" id="cfgOut">loading&hellip;</div>
+  </section>
+
+  <section>
     <h2>fire a /check</h2>
     <div class="row">
       <input id="key" value="alice" spellcheck="false" aria-label="rate-limit key">
@@ -77,6 +103,7 @@
     ["key_count", "keys tracked", false],
     ["bad_requests", "400s", false],
     ["not_found", "404s", false],
+    ["config_changes", "config changes", false],
     ["conns_accepted", "conns accepted", false],
     ["conns_closed", "conns closed", false],
     ["evictions", "evictions", false],
@@ -182,6 +209,65 @@
   document.getElementById("many").addEventListener("click", function () { send(20); });
   document.getElementById("key").addEventListener("keydown", function (e) {
     if (e.key === "Enter") send(1);
+  });
+
+  // ---- limiter config panel ----
+  var algoEl = document.getElementById("algo");
+  var cfgOut = document.getElementById("cfgOut");
+  var F = {
+    rate: document.getElementById("rate"),
+    burst: document.getElementById("burst"),
+    limit: document.getElementById("limit"),
+    window_ms: document.getElementById("window_ms")
+  };
+
+  function syncRows() {
+    var tb = algoEl.value === "token_bucket";
+    document.getElementById("tbRow").style.display = tb ? "flex" : "none";
+    document.getElementById("swRow").style.display = tb ? "none" : "flex";
+  }
+  algoEl.addEventListener("change", syncRows);
+
+  function loadCfg() {
+    fetch("/config", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (c) {
+        algoEl.value = c.algo;
+        F.rate.value = c.rate;
+        F.burst.value = c.burst;
+        F.limit.value = c.limit;
+        F.window_ms.value = c.window_ms;
+        syncRows();
+        cfgOut.classList.add("muted");
+        cfgOut.textContent = "in effect: " + c.algo;
+      })
+      .catch(function () {
+        cfgOut.classList.remove("muted");
+        cfgOut.textContent = "could not load /config";
+      });
+  }
+  loadCfg();
+
+  document.getElementById("apply").addEventListener("click", function () {
+    var qs = "algo=" + encodeURIComponent(algoEl.value);
+    if (algoEl.value === "token_bucket") {
+      qs += "&rate=" + encodeURIComponent(F.rate.value);
+      qs += "&burst=" + encodeURIComponent(F.burst.value);
+    } else {
+      qs += "&limit=" + encodeURIComponent(F.limit.value);
+      qs += "&window_ms=" + encodeURIComponent(F.window_ms.value);
+    }
+    fetch("/config?" + qs, { method: "POST", cache: "no-store" })
+      .then(function (r) { return r.text().then(function (t) { return { s: r.status, b: t }; }); })
+      .then(function (res) {
+        cfgOut.classList.remove("muted");
+        cfgOut.innerHTML = pill(res.s) + "\n" + res.b;
+        poll();
+      })
+      .catch(function () {
+        cfgOut.classList.remove("muted");
+        cfgOut.textContent = "request failed";
+      });
   });
 })();
 </script>

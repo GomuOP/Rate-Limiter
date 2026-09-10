@@ -8,12 +8,13 @@ namespace rl::core {
 
 /// Plain counters — the service is single-threaded (design 0.1), so no atomics.
 struct Stats {
-    std::uint64_t requests = 0;     // total HTTP requests handled
-    std::uint64_t checks = 0;       // requests routed to /check
-    std::uint64_t allowed = 0;      // /check decisions that allowed
-    std::uint64_t denied = 0;       // /check decisions that returned 429
-    std::uint64_t bad_requests = 0; // 400s (missing key, malformed request)
-    std::uint64_t not_found = 0;    // 404s
+    std::uint64_t requests = 0;       // total HTTP requests handled
+    std::uint64_t checks = 0;         // requests routed to /check
+    std::uint64_t allowed = 0;        // /check decisions that allowed
+    std::uint64_t denied = 0;         // /check decisions that returned 429
+    std::uint64_t bad_requests = 0;   // 400s (missing key, malformed request)
+    std::uint64_t not_found = 0;      // 404s
+    std::uint64_t config_changes = 0; // successful POST /config swaps
     std::uint64_t conns_accepted = 0;
     std::uint64_t conns_closed = 0;
     std::uint64_t evictions = 0;        // key-store LRU evictions

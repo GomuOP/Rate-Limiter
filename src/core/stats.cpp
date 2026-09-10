@@ -11,6 +11,7 @@ nlohmann::json Stats::to_json(std::size_t key_count, std::int64_t uptime_ms) con
         {"denied", denied},
         {"bad_requests", bad_requests},
         {"not_found", not_found},
+        {"config_changes", config_changes},
         {"conns_accepted", conns_accepted},
         {"conns_closed", conns_closed},
         {"key_count", key_count},
