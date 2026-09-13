@@ -213,6 +213,7 @@ Reproduce with `bench/run.sh`.
 |---|---|---:|---:|---:|---:|
 | `/healthz`, keep-alive | `-t4 -c128 -d10s` | **72,100 req/s** | 1.86 ms | 2.05 ms | 3.78 ms |
 | `/check`, 2000 keys, generous limit | `-t4 -c128 -d10s` | **97,900 req/s** | 1.20 ms | 1.50 ms | 2.58 ms |
+| `/check`, `mode: redis`, 2000 keys, generous limit | `-t4 -c128 -d10s` | **18,500 req/s** | 6.69 ms | 7.88 ms | 11.02 ms |
 | `/healthz`, `Connection: close` (1 req/conn) | `-t4 -c128 -d10s` | **19,100 req/s** | 4.14 ms | 7.16 ms | 14.06 ms |
 | `/check`, 10k connections, ASan build | `-t8 -c10000 -d20s` | 10,900 req/s | — | — | — |
 
@@ -223,6 +224,15 @@ correctness check, not a speed one: 10,002 connections accepted, clean
 Connection churn is ~4× slower than keep-alive because each request pays a full
 `accept`/`close` and a 3-way handshake; with keep-alive the accept cost
 amortises to zero.
+
+The `redis` row is against a local `redis-server` on the same loopback host,
+`--mode redis` with the stock `redis.timeout_ms: 50`. Throughput drops ~5×
+and p99 roughly 4× versus the local `/check` row: every request now pays a
+blocking `hiredis` round trip and an `EVALSHA` of the token-bucket Lua script
+on top of the in-process check, and that round trip happens synchronously on
+the reactor thread (see Known limitations below). `redis_errors` stayed at 0
+for the whole run, confirming the atomicity comes from the Lua script, not
+from retries masking failures.
 
 ---
 
