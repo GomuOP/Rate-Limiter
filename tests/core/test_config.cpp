@@ -22,7 +22,7 @@ TEST_CASE("config: empty object yields defaults") {
 
 TEST_CASE("config: full document is parsed") {
     json j = {
-        {"mode", "redis"},
+        {"mode", "local"},
         {"server", {{"host", "127.0.0.1"}, {"port", 9000}, {"max_header_bytes", 4096}}},
         {"limiter", {{"algo", "sliding_window"}, {"limit", 50}, {"window_ms", 2000}}},
         {"key_store", {{"max_keys", 10}, {"idle_ttl_ms", 1000}}},
@@ -31,7 +31,7 @@ TEST_CASE("config: full document is parsed") {
     };
     Config c = Config::from_json(j);
 
-    CHECK(c.mode == Config::Mode::redis);
+    CHECK(c.mode == Config::Mode::local);
     CHECK(c.server.host == "127.0.0.1");
     CHECK(c.server.port == 9000);
     CHECK(c.limiter.algo == LimiterConfig::Algo::sliding_window);
@@ -50,6 +50,19 @@ TEST_CASE("config: invalid enum strings throw") {
     CHECK_THROWS(Config::from_json(json{{"mode", "cluster"}}));
     CHECK_THROWS(Config::from_json(json{{"limiter", {{"algo", "leaky"}}}}));
     CHECK_THROWS(Config::from_json(json{{"key_extractor", {{"source", "cookie"}}}}));
+}
+
+TEST_CASE("config: redis mode requires the token bucket") {
+    CHECK_NOTHROW(Config::from_json(json{{"mode", "redis"}}));
+    CHECK_THROWS(
+        Config::from_json(json{{"mode", "redis"}, {"limiter", {{"algo", "sliding_window"}}}}));
+}
+
+TEST_CASE("config: parse_mode accepts only local and redis") {
+    CHECK(Config::parse_mode("local") == Config::Mode::local);
+    CHECK(Config::parse_mode("redis") == Config::Mode::redis);
+    CHECK_THROWS(Config::parse_mode("reddis"));
+    CHECK_THROWS(Config::parse_mode(""));
 }
 
 TEST_CASE("config: validation rejects nonsensical values") {

@@ -42,17 +42,17 @@ KeyExtractorConfig::Source parse_source(const std::string& s) {
                              "'");
 }
 
-Config::Mode parse_mode(const std::string& s) {
+} // namespace
+
+Config::Mode Config::parse_mode(const std::string& s) {
     if (s == "local") {
-        return Config::Mode::local;
+        return Mode::local;
     }
     if (s == "redis") {
-        return Config::Mode::redis;
+        return Mode::redis;
     }
     throw std::runtime_error("mode must be 'local' or 'redis', got '" + s + "'");
 }
-
-} // namespace
 
 Config Config::from_json(const json& j) {
     Config c;
@@ -153,6 +153,10 @@ void Config::validate() const {
         throw std::runtime_error("server.max_header_bytes must be >= 256");
     }
     limiter.validate();
+    if (mode == Mode::redis && limiter.algo != LimiterConfig::Algo::token_bucket) {
+        throw std::runtime_error("limiter.algo must be 'token_bucket' in redis mode "
+                                 "(the Lua script implements only the token bucket)");
+    }
     if (key_store.max_keys < 1) {
         throw std::runtime_error("key_store.max_keys must be >= 1");
     }

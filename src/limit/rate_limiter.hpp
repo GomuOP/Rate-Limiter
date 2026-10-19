@@ -31,6 +31,10 @@ class RateLimiter {
     /// Drop entries idle longer than the configured TTL. Called from the event
     /// loop's periodic timer. Returns the number removed.
     virtual std::size_t sweep_expired() = 0;
+
+    /// Entries evicted by the LRU bound since construction (0 for backends
+    /// that don't track).
+    virtual std::size_t evictions() const = 0;
 };
 
 } // namespace rl::limit

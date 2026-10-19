@@ -118,6 +118,9 @@ redis-server --port 6379 &
 # both instances now enforce one shared bucket per key
 ```
 
+Redis mode is token-bucket only; `limiter.algo: sliding_window` with
+`mode: redis` is rejected at startup.
+
 ---
 
 ## HTTP API

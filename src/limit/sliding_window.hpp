@@ -24,8 +24,7 @@ class SlidingWindowLimiter final : public RateLimiter {
     Decision check(std::string_view key, std::int64_t cost = 1) override;
     std::size_t key_count() const override { return store_.size(); }
     std::size_t sweep_expired() override { return store_.sweep_expired(); }
-
-    std::size_t evictions() const { return store_.evictions(); }
+    std::size_t evictions() const override { return store_.evictions(); }
 
   private:
     struct Window {

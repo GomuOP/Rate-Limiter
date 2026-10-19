@@ -24,6 +24,7 @@ class RedisRateLimiter final : public limit::RateLimiter {
     limit::Decision check(std::string_view key, std::int64_t cost = 1) override;
     std::size_t key_count() const override { return 0; } // Redis owns the keys
     std::size_t sweep_expired() override { return 0; }   // PEXPIRE handles it
+    std::size_t evictions() const override { return 0; } // no local key store
 
   private:
     bool load_script();

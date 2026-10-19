@@ -70,6 +70,9 @@ struct Config {
     static Config from_json(const nlohmann::json& j);
     static Config from_json_file(const std::string& path);
 
+    /// "local" or "redis"; throws std::runtime_error on anything else.
+    static Mode parse_mode(const std::string& s);
+
     /// Throws std::runtime_error on an invalid combination of values.
     void validate() const;
 };

@@ -110,8 +110,7 @@ int main(int argc, char** argv) {
             cfg = rl::core::Config::from_json_file(config_path);
         }
         if (mode_override) {
-            cfg.mode = (*mode_override == "redis") ? rl::core::Config::Mode::redis
-                                                   : rl::core::Config::Mode::local;
+            cfg.mode = rl::core::Config::parse_mode(*mode_override);
         }
         if (listen_override) {
             apply_hostport(*listen_override, cfg.server.host, cfg.server.port);

@@ -56,6 +56,7 @@ class Server {
     core::LimiterConfig live_limiter_cfg_;
     limit::KeyExtractor extractor_;
     core::Stats& stats_;
+    std::uint64_t retired_evictions_ = 0; // evictions from limiters replaced by /config
     core::TimePoint start_;
 
     net::EventLoop loop_;

@@ -127,6 +127,7 @@ void Server::handle(const Request& req, Response& resp) {
         const auto uptime =
             std::chrono::duration_cast<std::chrono::milliseconds>(core::Clock_t::now() - start_)
                 .count();
+        stats_.evictions = retired_evictions_ + limiter_->evictions();
         resp.set_status(200);
         resp.set_json(stats_.to_json(limiter_->key_count(), uptime));
         return;
@@ -264,6 +265,7 @@ void Server::handle_config(const Request& req, Response& resp) {
         return;
     }
 
+    retired_evictions_ += limiter_->evictions();
     limiter_ = std::move(rebuilt);
     live_limiter_cfg_ = next;
     ++stats_.config_changes;
