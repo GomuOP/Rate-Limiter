@@ -82,19 +82,19 @@ Server::Server(const core::Config& cfg,
 }
 
 void Server::on_accept(net::Fd fd, std::string peer_ip) {
-    ++stats_.conns_accepted;
+    stats_.conns_accepted.inc();
     const int fd_num = fd.get();
     auto conn = std::make_unique<net::Connection>(loop_, std::move(fd), std::move(peer_ip),
                                                   cfg_.server, handler_, [this](int f) {
                                                       if (conns_.erase(f) > 0) {
-                                                          ++stats_.conns_closed;
+                                                          stats_.conns_closed.inc();
                                                       }
                                                   });
     conns_.emplace(fd_num, std::move(conn));
 }
 
 void Server::handle(const Request& req, Response& resp) {
-    ++stats_.requests;
+    stats_.requests.inc();
 
     if (req.path == "/" || req.path == "/dashboard") {
         resp.set_status(200);
@@ -128,23 +128,23 @@ void Server::handle(const Request& req, Response& resp) {
         const auto uptime =
             std::chrono::duration_cast<std::chrono::milliseconds>(core::Clock_t::now() - start_)
                 .count();
-        stats_.evictions = retired_evictions_ + limiter_->evictions();
         resp.set_status(200);
-        resp.set_json(stats_.to_json(limiter_->key_count(), uptime));
+        resp.set_json(stats_.to_json(limiter_->key_count(),
+                                     retired_evictions_ + limiter_->evictions(), uptime));
         return;
     }
 
-    ++stats_.not_found;
+    stats_.not_found.inc();
     resp.set_status(404);
     resp.set_json({{"error", "not found"}});
 }
 
 void Server::handle_check(const Request& req, Response& resp) {
-    ++stats_.checks;
+    stats_.checks.inc();
 
     auto key = extractor_.extract(req);
     if (!key.ok) {
-        ++stats_.bad_requests;
+        stats_.bad_requests.inc();
         resp.set_status(400);
         resp.set_json({{"error", key.error}});
         return;
@@ -162,10 +162,10 @@ void Server::handle_check(const Request& req, Response& resp) {
     resp.add_header("X-RateLimit-Remaining", std::to_string(d.remaining));
 
     if (d.allowed) {
-        ++stats_.allowed;
+        stats_.allowed.inc();
         resp.set_status(200);
     } else {
-        ++stats_.denied;
+        stats_.denied.inc();
         resp.set_status(429);
         resp.add_header("Retry-After", std::to_string(retry_after_seconds(d.retry_after)));
         body["retry_after_ms"] = d.retry_after.count();
@@ -198,7 +198,7 @@ void Server::handle_config(const Request& req, Response& resp) {
     }
 
     auto bad = [&](const std::string& msg) {
-        ++stats_.bad_requests;
+        stats_.bad_requests.inc();
         resp.set_status(400);
         resp.set_json({{"error", msg}});
     };
@@ -269,7 +269,7 @@ void Server::handle_config(const Request& req, Response& resp) {
     retired_evictions_ += limiter_->evictions();
     limiter_ = std::move(rebuilt);
     live_limiter_cfg_ = next;
-    ++stats_.config_changes;
+    stats_.config_changes.inc();
 
     nlohmann::json body = limiter_cfg_json(live_limiter_cfg_);
     body["note"] = "limiter replaced; key store reset, counters unchanged";
@@ -295,7 +295,7 @@ void Server::run() {
 
     loop_.add_timer(
         cfg_.key_store.sweep_interval,
-        [this] { stats_.sweeps_removed += limiter_->sweep_expired(); }, /*repeat=*/true,
+        [this] { stats_.sweeps_removed.inc(limiter_->sweep_expired()); }, /*repeat=*/true,
         cfg_.key_store.sweep_interval);
 
     auto reap_every = cfg_.server.idle_timeout / 2;

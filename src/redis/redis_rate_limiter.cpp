@@ -60,13 +60,13 @@ limit::Decision RedisRateLimiter::fail_decision(std::int64_t /*cost*/) {
     limit::Decision d;
     d.limit = burst_;
     if (fail_closed_) {
-        ++stats_.redis_failclosed;
+        stats_.redis_failclosed.inc();
         d.allowed = false;
         d.remaining = 0;
         d.retry_after = Ms(1000);
         d.reset = Ms(1000);
     } else {
-        ++stats_.redis_failopen;
+        stats_.redis_failopen.inc();
         d.allowed = true;
         d.remaining = burst_;
     }
@@ -75,11 +75,11 @@ limit::Decision RedisRateLimiter::fail_decision(std::int64_t /*cost*/) {
 
 limit::Decision RedisRateLimiter::check(std::string_view key, std::int64_t cost) {
     if (!client_.ensure()) {
-        ++stats_.redis_errors;
+        stats_.redis_errors.inc();
         return fail_decision(cost);
     }
     if (sha_.empty() && !load_script()) {
-        ++stats_.redis_errors;
+        stats_.redis_errors.inc();
         return fail_decision(cost);
     }
 
@@ -104,7 +104,7 @@ limit::Decision RedisRateLimiter::check(std::string_view key, std::int64_t cost)
 
         redisReply* reply = client_.command_argv(8, argv.data(), lens.data());
         if (reply == nullptr) {
-            ++stats_.redis_errors;
+            stats_.redis_errors.inc();
             return fail_decision(cost);
         }
         ReplyGuard g{reply};
@@ -114,17 +114,17 @@ limit::Decision RedisRateLimiter::check(std::string_view key, std::int64_t cost)
                 std::strncmp(reply->str, "NOSCRIPT", 8) == 0) {
                 sha_.clear();
                 if (!load_script()) {
-                    ++stats_.redis_errors;
+                    stats_.redis_errors.inc();
                     return fail_decision(cost);
                 }
                 continue; // retry EVALSHA with the freshly loaded script
             }
-            ++stats_.redis_errors;
+            stats_.redis_errors.inc();
             return fail_decision(cost);
         }
 
         if (reply->type != REDIS_REPLY_ARRAY || reply->elements < 4) {
-            ++stats_.redis_errors;
+            stats_.redis_errors.inc();
             return fail_decision(cost);
         }
 
@@ -137,7 +137,7 @@ limit::Decision RedisRateLimiter::check(std::string_view key, std::int64_t cost)
         return d;
     }
 
-    ++stats_.redis_errors;
+    stats_.redis_errors.inc();
     return fail_decision(cost);
 }
 

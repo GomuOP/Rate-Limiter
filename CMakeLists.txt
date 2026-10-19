@@ -62,6 +62,8 @@ set(HIREDIS_TEST OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(nlohmann_json hiredis)
 
+find_package(Threads REQUIRED)
+
 # hiredis exports different target names across versions / build modes.
 if(TARGET hiredis::hiredis)
     set(RL_HIREDIS hiredis::hiredis)
@@ -96,7 +98,7 @@ target_include_directories(rl_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # SYSTEM: hiredis' sds.h uses flexible array members that trip -Wpedantic.
 target_include_directories(rl_core SYSTEM PRIVATE ${RL_HIREDIS_SRC})
 target_link_libraries(rl_core
-    PUBLIC  nlohmann_json::nlohmann_json
+    PUBLIC  nlohmann_json::nlohmann_json Threads::Threads
     PRIVATE rl_warnings ${RL_HIREDIS})
 
 # embed the Lua script and the status page as raw string literals at configure time
@@ -135,6 +137,7 @@ if(RL_BUILD_TESTS)
         tests/http/test_request_parser.cpp
         tests/http/test_query.cpp
         tests/core/test_config.cpp
+        tests/core/test_stats.cpp
         tests/net/test_listener.cpp
     )
     target_link_libraries(rl_tests PRIVATE rl_core rl_warnings Catch2::Catch2WithMain)
