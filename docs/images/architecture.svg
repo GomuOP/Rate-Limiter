@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -44 1000 684" width="1000" height="684" role="img" aria-label="rate-limiter architecture: a client connects to the Listener inside the single-threaded EventLoop; the Connection buffers bytes, RequestParser builds a Request, Server routes /check to handle_check, which calls RateLimiter::check. The limiter is a token bucket or sliding window over a KeyStore, or a RedisRateLimiter calling redis-server. The response goes back through the Connection's out buffer.">
+  <title>rate-limiter architecture</title>
+  <style>
+    .bg { fill: #ffffff; }
+    .box { fill: #ffffff; stroke: #c3cbd5; stroke-width: 1.2; }
+    .box-key { fill: #ffffff; stroke: #16202a; stroke-width: 1.4; }
+    .box-redis { fill: #ffffff; stroke: #b42346; stroke-width: 1.6; }
+    .frame { fill: none; stroke: #5a6573; stroke-width: 1.2; stroke-dasharray: 6 5; }
+    .iface { fill: #f4f6f8; stroke: #16202a; stroke-width: 1.2; stroke-dasharray: 3 3; }
+    .title { fill: #16202a; font: 700 18px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+    .t { fill: #16202a; font: 600 13px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+    .s { fill: #5a6573; font: 400 11px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+    .lab { fill: #5a6573; font: 600 11px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; letter-spacing: .06em; }
+    .req { fill: none; stroke: #c2410c; stroke-width: 2; }
+    .bg-line { fill: none; stroke: #5a6573; stroke-width: 1.3; stroke-dasharray: 4 4; }
+    .plain { fill: none; stroke: #5a6573; stroke-width: 1.3; }
+    .redis-line { fill: none; stroke: #b42346; stroke-width: 1.6; }
+    .head-req { fill: #c2410c; }
+    .head-mut { fill: #5a6573; }
+    .head-redis { fill: #b42346; }
+    .badge { fill: #c2410c; }
+    .badge-t { fill: #ffffff; font: 600 11px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+    .req-t { fill: #c2410c; font: 600 11px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+    .redis-t { fill: #b42346; font: 600 11px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0e1319; }
+      .box, .box-key, .box-redis { fill: #161e27; }
+      .box { stroke: #354352; }
+      .box-key { stroke: #e3e8ee; }
+      .box-redis, .redis-line { stroke: #f47191; }
+      .frame, .bg-line, .plain { stroke: #93a0af; }
+      .iface { fill: #0e1319; stroke: #e3e8ee; }
+      .title, .t { fill: #e3e8ee; }
+      .s, .lab, .head-mut { fill: #93a0af; }
+      .req { stroke: #fb923c; }
+      .head-req, .badge, .req-t { fill: #fb923c; }
+      .badge-t { fill: #0e1319; }
+      .head-redis, .redis-t { fill: #f47191; }
+    }
+  </style>
+  <defs>
+    <marker id="h-req" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-req" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="h-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-mut" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="h-redis" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-redis" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <rect class="bg" x="0" y="-44" width="1000" height="684"/>
+  <text class="title" x="20" y="-14">rate-limiter · request path</text>
+
+  <!-- client -->
+  <rect class="box-key" x="20" y="120" width="100" height="60" rx="6"/>
+  <text class="t" x="70" y="146" text-anchor="middle">Client</text>
+  <text class="s" x="70" y="164" text-anchor="middle">curl / wrk</text>
+
+  <!-- event loop frame -->
+  <rect class="frame" x="160" y="30" width="820" height="330" rx="10"/>
+  <text class="lab" x="178" y="54">EVENTLOOP · 1 THREAD · 1 EPOLL FD · LEVEL-TRIGGERED</text>
+
+  <!-- row 1 -->
+  <rect class="box" x="190" y="120" width="140" height="60" rx="6"/>
+  <text class="t" x="260" y="146" text-anchor="middle">Listener</text>
+  <text class="s" x="260" y="164" text-anchor="middle">accept4 -> EAGAIN</text>
+
+  <rect class="box" x="370" y="120" width="150" height="60" rx="6"/>
+  <text class="t" x="445" y="146" text-anchor="middle">Connection</text>
+  <text class="s" x="445" y="164" text-anchor="middle">in / out Buffer</text>
+
+  <rect class="box" x="560" y="120" width="160" height="60" rx="6"/>
+  <text class="t" x="640" y="146" text-anchor="middle">RequestParser</text>
+  <text class="s" x="640" y="164" text-anchor="middle">resumable, HTTP/1.1</text>
+
+  <rect class="box" x="760" y="120" width="190" height="60" rx="6"/>
+  <text class="t" x="855" y="146" text-anchor="middle">Server::handle</text>
+  <text class="s" x="855" y="164" text-anchor="middle">/check /stats /config /</text>
+
+  <!-- row 2 -->
+  <rect class="box" x="190" y="240" width="320" height="90" rx="6"/>
+  <text class="t" x="206" y="264">Timers (min-heap)</text>
+  <text class="s" x="206" y="288">every 5 s    -> sweep_expired()</text>
+  <text class="s" x="206" y="308">every idle/2 -> reap idle conns</text>
+
+  <rect class="box" x="550" y="240" width="160" height="60" rx="6"/>
+  <text class="t" x="630" y="264" text-anchor="middle">Stats</text>
+  <text class="s" x="630" y="282" text-anchor="middle">plain uint64_t</text>
+
+  <rect class="box" x="760" y="230" width="190" height="60" rx="6"/>
+  <text class="t" x="855" y="256" text-anchor="middle">handle_check</text>
+  <text class="s" x="855" y="274" text-anchor="middle">KeyExtractor -> key</text>
+
+  <!-- request path -->
+  <line class="req" x1="120" y1="150" x2="188" y2="150" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="155" cy="134" r="9"/><text class="badge-t" x="155" y="138" text-anchor="middle">1</text>
+
+  <line class="req" x1="330" y1="150" x2="368" y2="150" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="349" cy="134" r="9"/><text class="badge-t" x="349" y="138" text-anchor="middle">2</text>
+
+  <line class="req" x1="520" y1="150" x2="558" y2="150" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="539" cy="134" r="9"/><text class="badge-t" x="539" y="138" text-anchor="middle">3</text>
+
+  <line class="req" x1="720" y1="150" x2="758" y2="150" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="739" cy="134" r="9"/><text class="badge-t" x="739" y="138" text-anchor="middle">4</text>
+
+  <line class="req" x1="855" y1="180" x2="855" y2="228" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="871" cy="205" r="9"/><text class="badge-t" x="871" y="209" text-anchor="middle">5</text>
+
+  <line class="req" x1="900" y1="290" x2="900" y2="388" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="900" cy="322" r="9"/><text class="badge-t" x="900" y="326" text-anchor="middle">6</text>
+  <text class="req-t" x="886" y="347" text-anchor="end">check(key)</text>
+
+  <line class="req" x1="800" y1="390" x2="800" y2="292" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="800" cy="322" r="9"/><text class="badge-t" x="800" y="326" text-anchor="middle">7</text>
+  <text class="req-t" x="786" y="347" text-anchor="end">Decision</text>
+
+  <polyline class="req" points="775,230 775,205 445,205 445,182" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="610" cy="205" r="9"/><text class="badge-t" x="610" y="209" text-anchor="middle">8</text>
+  <text class="req-t" x="626" y="199">200 / 429 -> out Buffer</text>
+
+  <polyline class="req" points="395,120 395,85 70,85 70,118" marker-end="url(#h-req)"/>
+  <circle class="badge" cx="230" cy="85" r="9"/><text class="badge-t" x="230" y="89" text-anchor="middle">9</text>
+  <text class="req-t" x="246" y="80">write()</text>
+
+  <!-- stats + timer side effects -->
+  <line class="bg-line" x1="760" y1="270" x2="712" y2="270" marker-end="url(#h-mut)"/>
+  <polyline class="bg-line" points="350,330 350,412 418,412" marker-end="url(#h-mut)"/>
+  <text class="s" x="358" y="378">sweep</text>
+
+  <!-- limiter layer -->
+  <rect class="iface" x="420" y="390" width="560" height="44" rx="6"/>
+  <text class="t" x="700" y="417" text-anchor="middle">RateLimiter::check(key, cost) -> Decision</text>
+
+  <line class="plain" x1="507" y1="434" x2="507" y2="470"/>
+  <line class="plain" x1="697" y1="434" x2="697" y2="470"/>
+  <line class="plain" x1="890" y1="434" x2="890" y2="470"/>
+
+  <rect class="box" x="420" y="470" width="175" height="56" rx="6"/>
+  <text class="t" x="507" y="494" text-anchor="middle">TokenBucket</text>
+  <text class="s" x="507" y="512" text-anchor="middle">mode local · lazy refill</text>
+
+  <rect class="box" x="610" y="470" width="175" height="56" rx="6"/>
+  <text class="t" x="697" y="494" text-anchor="middle">SlidingWindow</text>
+  <text class="s" x="697" y="512" text-anchor="middle">mode local · 2 windows</text>
+
+  <rect class="box-redis" x="800" y="470" width="180" height="56" rx="6"/>
+  <text class="t" x="890" y="494" text-anchor="middle">RedisRateLimiter</text>
+  <text class="s" x="890" y="512" text-anchor="middle">mode redis · hiredis</text>
+
+  <line class="plain" x1="507" y1="526" x2="507" y2="560"/>
+  <line class="plain" x1="697" y1="526" x2="697" y2="560"/>
+  <rect class="box" x="420" y="560" width="365" height="56" rx="6"/>
+  <text class="t" x="602" y="584" text-anchor="middle">KeyStore&lt;V&gt;</text>
+  <text class="s" x="602" y="602" text-anchor="middle">unordered_map + LRU list · max_keys · idle TTL</text>
+
+  <line class="redis-line" x1="890" y1="526" x2="890" y2="558" marker-end="url(#h-redis)"/>
+  <text class="redis-t" x="898" y="547">blocking RTT</text>
+  <rect class="box-redis" x="800" y="560" width="180" height="56" rx="6"/>
+  <text class="t" x="890" y="584" text-anchor="middle">redis-server</text>
+  <text class="s" x="890" y="602" text-anchor="middle">EVALSHA token_bucket.lua</text>
+
+  <!-- legend -->
+  <text class="lab" x="20" y="470">LEGEND</text>
+  <line class="req" x1="20" y1="494" x2="60" y2="494"/>
+  <text class="s" x="70" y="498">request path (numbered)</text>
+  <line class="bg-line" x1="20" y1="518" x2="60" y2="518"/>
+  <text class="s" x="70" y="522">timer / side effect</text>
+  <rect class="iface" x="20" y="534" width="40" height="18" rx="3"/>
+  <text class="s" x="70" y="547">abstract interface</text>
+  <rect class="box-redis" x="20" y="564" width="40" height="18" rx="3"/>
+  <text class="s" x="70" y="577">network hop to Redis</text>
+</svg>

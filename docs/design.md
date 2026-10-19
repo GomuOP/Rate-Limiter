@@ -46,6 +46,10 @@ Status: agreed 2026-09-10.
   the network limit. Interfaces are kept reactor-friendly: injectable clock,
   limiter behind an abstract interface, per-connection state owned by the
   connection object.
+- **Revisited 2026-10-20 → 0.20.** The multi-reactor option rejected above
+  is now built, opt-in through `server.threads`; `threads: 1` keeps this
+  decision exactly. The "then how do they agree?" question is answered with a
+  shared lock-striped limiter.
 
 ### 0.2 Rate-limit algorithms
 
@@ -335,6 +339,102 @@ Status: agreed 2026-09-10.
   - *Supporting the swap in `redis` mode* — possible (rebuild the
     `RedisRateLimiter`), but the reconnect churn is not worth it for what is
     a local demo affordance. Noted as an extension.
+- **Amended by 0.20** — the limiter is now held by `shared_ptr` (several
+  Servers may share it), and `POST /config` also returns `409` when
+  `server.threads > 1`.
+
+### 0.20 Multi-threading: one reactor per thread
+
+Status: built 2026-10-20 (revisits 0.1).
+
+- **Decision** — `server.threads = N` (default 1; `--threads N`). `main()`
+  builds N `Server`s, each with its own `EventLoop`, `Listener` and
+  connections, and runs each on its own `std::thread`.
+  - **Accepting: `SO_REUSEPORT`.** Every listener binds the same port; the
+    kernel keeps one accept queue per socket and hashes each new connection
+    (4-tuple) to one of them. No shared accept queue, no thundering herd. The
+    option is set only when `threads > 1`, so a second copy started by
+    mistake with `threads: 1` still fails with `EADDRINUSE` instead of
+    silently splitting traffic (and doubling every limit, since each process
+    has its own buckets).
+  - **Local mode: one shared `ShardedLimiter`.** The kernel spreads
+    *connections*, not *keys*: requests for one key arrive on any thread, so
+    per-key state must be shared. `ShardedLimiter` holds K = 64 stripes, each
+    a `std::mutex` plus an ordinary single-threaded limiter; `check()` locks
+    stripe `hash(key) % K` and delegates. The inner limiters stay lock-free
+    and unchanged; the stripe mutex is the only synchronisation. Aggregate
+    reads (`key_count`, `sweep_expired`, `evictions`) lock one stripe at a
+    time and sum. Each stripe gets `ceil(max_keys / K)` keys so the memory
+    bound holds overall; giving each stripe the full `max_keys` would
+    silently multiply it by K.
+  - **Redis mode: one `RedisRateLimiter` per thread.** A hiredis context is
+    not thread-safe; Redis already holds the shared state, so nothing else is
+    shared.
+  - **Stats: relaxed atomics.** `core::Counter` wraps
+    `std::atomic<uint64_t>` and exposes only `inc()` =
+    `fetch_add(relaxed)` and `get()` = `load(relaxed)`. `fetch_add` is an
+    atomic read-modify-write at every ordering, so no increment is lost;
+    relaxed only gives up ordering against *other* memory, and no counter is
+    used to publish other data. `evictions` became a value read from the
+    limiter at `/stats` time instead of a stored field.
+  - **Shutdown: blocked signals + `sigwait` + eventfd.** SIGINT/SIGTERM are
+    blocked before any thread starts (threads inherit the mask); the main
+    thread `sigwait()`s, calls `stop()` on every Server and joins. The old
+    `volatile sig_atomic_t` stop flag was only safe against the same thread's
+    signal handler; across threads it is a data race, so it is now
+    `std::atomic<bool>`. A loop with no fds or timers sits in
+    `epoll_wait(-1)` and would never re-read a flag, so each loop registers an
+    eventfd that `stop()` writes. A worker whose loop throws sends SIGTERM to
+    the process so all threads stop together.
+  - **Housekeeping.** Only Server 0 runs the key-sweep timer (one sweep of
+    the shared limiter, not N). `POST /config` returns `409` when
+    `threads > 1`. Servers are built on the main thread so bind and config
+    errors still exit 1 before anything runs.
+- **Rejected**
+  - *Private limiter per thread* — the kernel's hash ignores the key, so a
+    key would get up to N independent buckets: N × the configured limit, with
+    nothing reporting an error.
+  - *One global mutex around one limiter* — correct, but every request on
+    every thread serialises on one lock; adding threads stops helping once
+    that lock is the hot spot.
+  - *Lock-free concurrent hash map* — the bucket update is a multi-field
+    read-modify-write and the LRU list is a doubly linked list; making both
+    lock-free means hazard pointers or epochs for memory reclamation and
+    careful ABA handling. Measured, the striped lock is not the bottleneck
+    (one hot key runs as fast as 2000 spread keys), so the complexity buys
+    nothing here.
+  - *One shared listening fd in every loop* — every new connection wakes
+    every thread and one `accept` wins (thundering herd); `EPOLLEXCLUSIVE`
+    reduces the wakeups but not the imbalance.
+  - *Acceptor thread handing fds to workers* — an extra hop and a queue per
+    connection, and the acceptor becomes the bottleneck under churn.
+  - *Signal handler that stops every server* — it runs on whichever thread
+    the kernel picks, and everything it touches must be async-signal-safe;
+    `sigwait` on one known thread is simpler to reason about.
+  - *seq_cst counters, or a mutex around `Stats`* — stronger than needed;
+    the mutex would add a second hot lock to every request.
+  - *Per-thread counters summed on read* — avoids shared cache-line traffic;
+    deferred until profiling shows the counters matter.
+  - *Live `/config` swap with threads* — would need `std::atomic<std::shared_ptr>`
+    (or RCU) so a thread inside `check()` keeps the old limiter alive; left
+    as an extension.
+- **Verified**
+  - `tsan` preset (`-fsanitize=thread`, test binary under `setarch -R` for
+    GCC 13 on `mmap_rnd_bits = 32` kernels); runs in CI. 53/53 tests clean.
+    Removing the stripe `lock_guard` in `ShardedLimiter::check` made the
+    8-thread hot-key test produce 27 data-race reports (concurrent
+    `unordered_map` and `std::list` insertion in `KeyStore::get_or_create`,
+    and the token count) followed by a SIGSEGV.
+  - End to end with 4 threads: 200 concurrent connections on one key with
+    burst 20 → exactly 20 allowed, in local and redis mode; load spread evenly
+    across workers; the TSan-built server served ~430k mixed requests with no
+    reports.
+  - Scaling (README, `bench/run.sh scaling`): `/check` 111.6k → 211.0k →
+    300.1k req/s at 1 → 2 → 4 threads; CPU-bound at 4 threads.
+- **Revisit if** — scaling flattens before the core count (try per-thread
+  counters, then thread pinning); one key is hot enough to saturate its
+  stripe (that key is the bottleneck in any design that keeps it exact);
+  live reconfiguration is needed with threads.
 
 ---
 
