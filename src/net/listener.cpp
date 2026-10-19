@@ -15,7 +15,10 @@ namespace rl::net {
 
 namespace {
 
-Fd make_listening_socket(const std::string& host, std::uint16_t port, int backlog) {
+Fd make_listening_socket(const std::string& host,
+                         std::uint16_t port,
+                         int backlog,
+                         bool reuse_port) {
     addrinfo hints{};
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -38,6 +41,15 @@ Fd make_listening_socket(const std::string& host, std::uint16_t port, int backlo
     int one = 1;
     ::setsockopt(sock.get(), SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
+    // One listening socket per worker thread, all on the same port; the kernel
+    // hashes each new connection to one of them (design 0.20). Off for a single
+    // thread so a second instance on the same port still fails with EADDRINUSE.
+    if (reuse_port && ::setsockopt(sock.get(), SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one)) != 0) {
+        int e = errno;
+        ::freeaddrinfo(res);
+        throw std::system_error(e, std::system_category(), "setsockopt SO_REUSEPORT");
+    }
+
     if (::bind(sock.get(), res->ai_addr, res->ai_addrlen) != 0) {
         int e = errno;
         ::freeaddrinfo(res);
@@ -57,8 +69,9 @@ Listener::Listener(EventLoop& loop,
                    const std::string& host,
                    std::uint16_t port,
                    int backlog,
+                   bool reuse_port,
                    AcceptHandler on_accept)
-    : loop_(loop), sock_(make_listening_socket(host, port, backlog)),
+    : loop_(loop), sock_(make_listening_socket(host, port, backlog, reuse_port)),
       on_accept_(std::move(on_accept)) {
     loop_.add(sock_.get(), EPOLLIN, [this](std::uint32_t) { on_readable(); });
 }

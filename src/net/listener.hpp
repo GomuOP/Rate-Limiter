@@ -12,6 +12,7 @@ namespace rl::net {
 /// Listening TCP socket. Accepts in a loop until EAGAIN and hands each new
 /// connection (already non-blocking, CLOEXEC) plus its peer IP to the handler.
 /// Construction throws std::system_error on failure (startup path, design 0.10).
+/// `reuse_port` sets SO_REUSEPORT so several listeners can share one port.
 class Listener {
   public:
     using AcceptHandler = std::function<void(Fd conn, std::string peer_ip)>;
@@ -20,6 +21,7 @@ class Listener {
              const std::string& host,
              std::uint16_t port,
              int backlog,
+             bool reuse_port,
              AcceptHandler on_accept);
     ~Listener();
 

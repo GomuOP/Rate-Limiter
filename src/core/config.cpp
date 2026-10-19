@@ -69,6 +69,7 @@ Config Config::from_json(const json& j) {
         c.server.max_body_bytes = get_or<std::size_t>(s, "max_body_bytes", c.server.max_body_bytes);
         c.server.idle_timeout = std::chrono::milliseconds(
             get_or<std::int64_t>(s, "idle_timeout_ms", c.server.idle_timeout.count()));
+        c.server.threads = get_or<int>(s, "threads", c.server.threads);
     }
 
     if (auto it = j.find("limiter"); it != j.end()) {
@@ -151,6 +152,9 @@ void Config::validate() const {
     }
     if (server.max_header_bytes < 256) {
         throw std::runtime_error("server.max_header_bytes must be >= 256");
+    }
+    if (server.threads < 1 || server.threads > 256) {
+        throw std::runtime_error("server.threads must be in [1, 256]");
     }
     limiter.validate();
     if (mode == Mode::redis && limiter.algo != LimiterConfig::Algo::token_bucket) {

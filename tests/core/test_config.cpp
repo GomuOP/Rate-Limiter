@@ -18,6 +18,7 @@ TEST_CASE("config: empty object yields defaults") {
     CHECK(c.limiter.algo == LimiterConfig::Algo::token_bucket);
     CHECK(c.limiter.rate == 100.0);
     CHECK(c.key_store.max_keys == 100'000);
+    CHECK(c.server.threads == 1);
 }
 
 TEST_CASE("config: full document is parsed") {
@@ -70,6 +71,9 @@ TEST_CASE("config: validation rejects nonsensical values") {
     CHECK_THROWS(Config::from_json(json{{"limiter", {{"algo", "token_bucket"}, {"burst", 0}}}}));
     CHECK_THROWS(Config::from_json(json{{"limiter", {{"algo", "sliding_window"}, {"limit", 0}}}}));
     CHECK_THROWS(Config::from_json(json{{"server", {{"port", 0}}}}));
+    CHECK_THROWS(Config::from_json(json{{"server", {{"threads", 0}}}}));
+    CHECK_THROWS(Config::from_json(json{{"server", {{"threads", 257}}}}));
+    CHECK(Config::from_json(json{{"server", {{"threads", 4}}}}).server.threads == 4);
 }
 
 TEST_CASE("config: LimiterConfig::validate checks only the active algo's fields") {

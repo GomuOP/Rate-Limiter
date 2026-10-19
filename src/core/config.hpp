@@ -15,6 +15,7 @@ struct ServerConfig {
     std::size_t max_header_bytes = 8192;
     std::size_t max_body_bytes = 65536; // bodies are drained, not read
     std::chrono::milliseconds idle_timeout{15000};
+    int threads = 1; // worker event loops; >1 enables SO_REUSEPORT (design 0.20)
 };
 
 struct LimiterConfig {

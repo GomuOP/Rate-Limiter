@@ -1,3 +1,4 @@
+#include <charconv>
 #include <csignal>
 #include <cstdlib>
 #include <exception>
@@ -33,6 +34,7 @@ void print_usage(const char* argv0) {
               << "  --listen <host:port>   override server.host / server.port\n"
               << "  --mode <local|redis>   override mode\n"
               << "  --redis <host:port>    override redis.host / redis.port\n"
+              << "  --threads <n>          override server.threads\n"
               << "  -h, --help\n";
 }
 
@@ -48,6 +50,17 @@ void apply_hostport(std::string_view hp, std::string& host, std::uint16_t& port)
         host.assign(h);
     }
     port = static_cast<std::uint16_t>(std::stoi(std::string(p)));
+}
+
+/// Parse a whole decimal int; throws on trailing garbage ("4x") or overflow.
+int parse_int(std::string_view s, const char* what) {
+    int out = 0;
+    auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), out);
+    if (ec != std::errc{} || ptr != s.data() + s.size()) {
+        throw std::runtime_error(std::string(what) + " must be an integer, got '" + std::string(s) +
+                                 "'");
+    }
+    return out;
 }
 
 // Build a limiter for `lc`, taking non-algorithm settings (mode, key-store
@@ -75,7 +88,7 @@ std::unique_ptr<rl::limit::RateLimiter> make_limiter(const rl::core::Config& bas
 
 int main(int argc, char** argv) {
     std::string config_path;
-    std::optional<std::string> listen_override, redis_override, mode_override;
+    std::optional<std::string> listen_override, redis_override, mode_override, threads_override;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -94,6 +107,8 @@ int main(int argc, char** argv) {
             redis_override = need_arg();
         } else if (a == "--mode") {
             mode_override = need_arg();
+        } else if (a == "--threads") {
+            threads_override = need_arg();
         } else if (a == "-h" || a == "--help") {
             print_usage(argv[0]);
             return 0;
@@ -117,6 +132,9 @@ int main(int argc, char** argv) {
         }
         if (redis_override) {
             apply_hostport(*redis_override, cfg.redis.host, cfg.redis.port);
+        }
+        if (threads_override) {
+            cfg.server.threads = parse_int(*threads_override, "--threads");
         }
         cfg.validate();
     } catch (const std::exception& e) {

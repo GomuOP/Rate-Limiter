@@ -77,6 +77,7 @@ Server::Server(const core::Config& cfg,
                 cfg.server.host,
                 cfg.server.port,
                 cfg.server.backlog,
+                /*reuse_port=*/cfg.server.threads > 1,
                 [this](net::Fd fd, std::string ip) { on_accept(std::move(fd), std::move(ip)); }) {
 }
 

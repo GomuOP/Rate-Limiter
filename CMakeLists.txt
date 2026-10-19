@@ -135,6 +135,7 @@ if(RL_BUILD_TESTS)
         tests/http/test_request_parser.cpp
         tests/http/test_query.cpp
         tests/core/test_config.cpp
+        tests/net/test_listener.cpp
     )
     target_link_libraries(rl_tests PRIVATE rl_core rl_warnings Catch2::Catch2WithMain)
 
