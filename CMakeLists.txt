@@ -135,6 +135,7 @@ if(RL_BUILD_TESTS)
         tests/limit/test_sliding_window.cpp
         tests/limit/test_key_store.cpp
         tests/limit/test_key_extractor.cpp
+        tests/limit/test_sharded_limiter.cpp
         tests/http/test_request_parser.cpp
         tests/http/test_query.cpp
         tests/core/test_config.cpp
