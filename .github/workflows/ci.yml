@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [ci-debug, ci-release]
+        preset: [ci-debug, ci-release, tsan]
     services:
       redis:
         image: redis:7

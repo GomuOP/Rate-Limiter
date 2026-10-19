@@ -11,6 +11,7 @@ endif()
 
 option(RL_WERROR "Treat warnings as errors (CI)" OFF)
 option(RL_SANITIZE "Build with ASan + UBSan" OFF)
+option(RL_TSAN "Build with ThreadSanitizer (exclusive with RL_SANITIZE)" OFF)
 option(RL_BUILD_TESTS "Build the test target" ON)
 option(RL_ENABLE_LTO "Enable IPO/LTO if supported" OFF)
 
@@ -27,6 +28,17 @@ if(RL_SANITIZE)
     add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all
                         -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
+endif()
+
+# TSan instruments every memory access to find data races between threads. It
+# replaces the allocator and shadow memory layout just as ASan does, so the two
+# cannot share a binary: it gets its own preset (design 0.20).
+if(RL_TSAN)
+    if(RL_SANITIZE)
+        message(FATAL_ERROR "RL_TSAN and RL_SANITIZE are mutually exclusive")
+    endif()
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
 endif()
 
 # --- LTO (release preset) -------------------------------------------------------
@@ -143,6 +155,14 @@ if(RL_BUILD_TESTS)
         tests/net/test_listener.cpp
     )
     target_link_libraries(rl_tests PRIVATE rl_core rl_warnings Catch2::Catch2WithMain)
+
+    # GCC 13's TSan runtime aborts ("unexpected memory mapping") on kernels with
+    # vm.mmap_rnd_bits = 32. `setarch -R` disables ASLR for just this process,
+    # no root needed. catch_discover_tests runs the binary through this
+    # emulator both when listing tests and when ctest runs them.
+    if(RL_TSAN)
+        set_property(TARGET rl_tests PROPERTY CROSSCOMPILING_EMULATOR setarch;-R)
+    endif()
 
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)

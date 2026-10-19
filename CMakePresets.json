@@ -15,6 +15,18 @@
       }
     },
     {
+      "name": "tsan",
+      "displayName": "Debug (ThreadSanitizer)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O1 -g",
+        "RL_TSAN": "ON",
+        "RL_BUILD_TESTS": "ON"
+      }
+    },
+    {
       "name": "release",
       "displayName": "Release (-O3, LTO)",
       "generator": "Ninja",
@@ -41,6 +53,7 @@
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
+    { "name": "tsan", "configurePreset": "tsan" },
     { "name": "release", "configurePreset": "release" },
     { "name": "ci-debug", "configurePreset": "ci-debug" },
     { "name": "ci-release", "configurePreset": "ci-release" }
@@ -49,6 +62,12 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error", "stopOnFailure": false }
     },
