@@ -1,4 +1,4 @@
-# rate-limiter
+# Rate-Limiter
 
 A from-scratch rate limiting service in C++20: a reusable core library, a
 hand-written HTTP/1.1 front end, and Redis-backed distributed limiting for
