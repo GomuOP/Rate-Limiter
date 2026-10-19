@@ -2,7 +2,7 @@
 
 #include <sys/epoll.h>
 
-#include <csignal>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <queue>
@@ -19,6 +19,9 @@ namespace rl::net {
 /// readiness stays asserted until the fd is drained, so a handler that reads
 /// once and returns is still correct; handlers here drain until EAGAIN anyway
 /// for throughput.
+///
+/// Everything except stop() must be called from the thread running run().
+/// With several worker threads each owns one loop (design 0.20).
 class EventLoop {
   public:
     using IoCallback = std::function<void(std::uint32_t events)>;
@@ -46,7 +49,11 @@ class EventLoop {
     void defer(std::function<void()> fn);
 
     void run();
-    void stop() { stop_flag_ = 1; } // safe to call from a signal handler
+
+    /// Make run() return. Safe from any thread (and async-signal-safe): sets
+    /// the flag, then writes the eventfd so a loop blocked in epoll_wait with
+    /// nothing else to do wakes up and sees it.
+    void stop();
 
   private:
     int next_timeout_ms(core::TimePoint now) const;
@@ -65,13 +72,16 @@ class EventLoop {
     };
 
     Fd epfd_;
+    Fd wakefd_; // eventfd registered in epfd_; written by stop()
     std::unordered_map<int, IoCallback> cbs_;
     std::priority_queue<Timer, std::vector<Timer>, Later> timers_;
     std::unordered_set<TimerId> cancelled_;
     std::vector<std::function<void()>> deferred_;
     std::vector<epoll_event> events_;
     TimerId next_timer_id_ = 1;
-    volatile std::sig_atomic_t stop_flag_ = 0;
+    // Relaxed is enough: the flag publishes no other data, and the eventfd
+    // write is what guarantees the loop wakes up to re-read it.
+    std::atomic<bool> stop_flag_{false};
     bool running_ = false;
 };
 

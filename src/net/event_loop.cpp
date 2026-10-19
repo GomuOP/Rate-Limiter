@@ -1,6 +1,8 @@
 #include "net/event_loop.hpp"
 
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -10,10 +12,27 @@
 
 namespace rl::net {
 
-EventLoop::EventLoop() : epfd_(::epoll_create1(EPOLL_CLOEXEC)), events_(1024) {
+EventLoop::EventLoop()
+    : epfd_(::epoll_create1(EPOLL_CLOEXEC)), wakefd_(::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)),
+      events_(1024) {
     if (!epfd_) {
         throw std::system_error(errno, std::system_category(), "epoll_create1");
     }
+    if (!wakefd_) {
+        throw std::system_error(errno, std::system_category(), "eventfd");
+    }
+    add(wakefd_.get(), EPOLLIN, [this](std::uint32_t) {
+        std::uint64_t n = 0;
+        while (::read(wakefd_.get(), &n, sizeof(n)) == static_cast<ssize_t>(sizeof(n))) {
+        } // drain so level-triggered epoll stops reporting it
+    });
+}
+
+void EventLoop::stop() {
+    stop_flag_.store(true, std::memory_order_relaxed);
+    const std::uint64_t one = 1;
+    // Can only fail if the counter would overflow, which a wakeup never needs.
+    [[maybe_unused]] auto n = ::write(wakefd_.get(), &one, sizeof(one));
 }
 
 EventLoop::~EventLoop() = default;
@@ -107,7 +126,7 @@ void EventLoop::drain_deferred() {
 
 void EventLoop::run() {
     running_ = true;
-    while (running_ && !stop_flag_) {
+    while (running_ && !stop_flag_.load(std::memory_order_relaxed)) {
         const auto now = core::Clock_t::now();
         const int timeout = next_timeout_ms(now);
 

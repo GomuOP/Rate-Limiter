@@ -24,20 +24,28 @@ namespace rl::http {
 using LimiterFactory =
     std::function<std::unique_ptr<limit::RateLimiter>(const core::LimiterConfig&)>;
 
-/// The HTTP service (design 0.1, 0.17, 0.19): one epoll loop, one listener, a
-/// map of live connections, and the routes GET / (dashboard), GET /check,
-/// GET /healthz, GET /stats, GET|POST /config.
+/// The HTTP service (design 0.1, 0.17, 0.19, 0.20): one epoll loop, one
+/// listener, a map of live connections, and the routes GET / (dashboard),
+/// GET /check, GET /healthz, GET /stats, GET|POST /config.
+///
+/// With server.threads = N, main() builds N Servers and runs each on its own
+/// thread. They share `stats` and, in local mode, one thread-safe limiter;
+/// everything else (loop, listener, connections) belongs to one Server.
 class Server {
   public:
-    /// `limiter` is the initial limiter; `make_limiter` rebuilds it when
-    /// POST /config arrives. `make_limiter(initial_cfg.limiter)` must have
-    /// produced `limiter`.
+    /// `limiter` is the initial limiter, possibly shared with other Servers;
+    /// `make_limiter` rebuilds it when POST /config arrives (threads = 1
+    /// only). `run_sweeper` is true on exactly one Server so a shared limiter
+    /// is swept once per interval, not once per thread.
     Server(const core::Config& cfg,
-           std::unique_ptr<limit::RateLimiter> limiter,
+           std::shared_ptr<limit::RateLimiter> limiter,
            LimiterFactory make_limiter,
-           core::Stats& stats);
+           core::Stats& stats,
+           bool run_sweeper = true);
 
+    /// Runs the event loop on the calling thread until stop().
     void run();
+    /// Safe to call from any thread.
     void stop() { loop_.stop(); }
 
     net::EventLoop& loop() { return loop_; }
@@ -51,12 +59,13 @@ class Server {
     void reap_idle();
 
     const core::Config& cfg_;
-    std::unique_ptr<limit::RateLimiter> limiter_;
+    std::shared_ptr<limit::RateLimiter> limiter_;
     LimiterFactory make_limiter_;
     core::LimiterConfig live_limiter_cfg_;
     limit::KeyExtractor extractor_;
     core::Stats& stats_;
     std::uint64_t retired_evictions_ = 0; // evictions from limiters replaced by /config
+    bool run_sweeper_;
     core::TimePoint start_;
 
     net::EventLoop loop_;

@@ -153,6 +153,7 @@ if(RL_BUILD_TESTS)
         tests/core/test_config.cpp
         tests/core/test_stats.cpp
         tests/net/test_listener.cpp
+        tests/net/test_event_loop.cpp
     )
     target_link_libraries(rl_tests PRIVATE rl_core rl_warnings Catch2::Catch2WithMain)
 

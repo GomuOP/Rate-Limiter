@@ -66,12 +66,13 @@ std::optional<double> parse_double(const std::string& s) {
 } // namespace
 
 Server::Server(const core::Config& cfg,
-               std::unique_ptr<limit::RateLimiter> limiter,
+               std::shared_ptr<limit::RateLimiter> limiter,
                LimiterFactory make_limiter,
-               core::Stats& stats)
+               core::Stats& stats,
+               bool run_sweeper)
     : cfg_(cfg), limiter_(std::move(limiter)), make_limiter_(std::move(make_limiter)),
       live_limiter_cfg_(cfg.limiter), extractor_(cfg.key_extractor), stats_(stats),
-      start_(core::Clock_t::now()), loop_(),
+      run_sweeper_(run_sweeper), start_(core::Clock_t::now()), loop_(),
       handler_([this](const Request& req, Response& resp) { handle(req, resp); }),
       listener_(loop_,
                 cfg.server.host,
@@ -177,7 +178,10 @@ void Server::handle_check(const Request& req, Response& resp) {
 // POST /config?algo=&rate=&burst=&limit=&window_ms=  -> merge the given fields
 // onto the live config, rebuild the limiter, and swap it in. Any field left
 // out keeps its current value. A rebuild starts from an empty key store, so
-// existing buckets/windows are cleared (design 0.19). Local mode only.
+// existing buckets/windows are cleared (design 0.19). Local mode and
+// server.threads = 1 only: with several threads the limiter is shared, and
+// swapping it while another thread is inside check() would free memory that
+// thread is still using (design 0.20).
 void Server::handle_config(const Request& req, Response& resp) {
     if (req.method == "GET" || req.method == "HEAD") {
         resp.set_status(200);
@@ -194,6 +198,12 @@ void Server::handle_config(const Request& req, Response& resp) {
     if (cfg_.mode != core::Config::Mode::local) {
         resp.set_status(409);
         resp.set_json({{"error", "live limiter reconfiguration is only supported in local mode"}});
+        return;
+    }
+    if (cfg_.server.threads > 1) {
+        resp.set_status(409);
+        resp.set_json(
+            {{"error", "live limiter reconfiguration is only supported with server.threads = 1"}});
         return;
     }
 
@@ -293,10 +303,12 @@ void Server::reap_idle() {
 void Server::run() {
     start_ = core::Clock_t::now();
 
-    loop_.add_timer(
-        cfg_.key_store.sweep_interval,
-        [this] { stats_.sweeps_removed.inc(limiter_->sweep_expired()); }, /*repeat=*/true,
-        cfg_.key_store.sweep_interval);
+    if (run_sweeper_) {
+        loop_.add_timer(
+            cfg_.key_store.sweep_interval,
+            [this] { stats_.sweeps_removed.inc(limiter_->sweep_expired()); }, /*repeat=*/true,
+            cfg_.key_store.sweep_interval);
+    }
 
     auto reap_every = cfg_.server.idle_timeout / 2;
     if (reap_every < std::chrono::milliseconds(1000)) {

@@ -1,3 +1,8 @@
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h>
+
+#include <atomic>
 #include <charconv>
 #include <csignal>
 #include <cstdlib>
@@ -7,26 +12,26 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #include "core/clock.hpp"
 #include "core/config.hpp"
 #include "core/stats.hpp"
 #include "http/server.hpp"
 #include "limit/rate_limiter.hpp"
+#include "limit/sharded_limiter.hpp"
 #include "limit/sliding_window.hpp"
 #include "limit/token_bucket.hpp"
 #include "redis/redis_rate_limiter.hpp"
 
 namespace {
 
-rl::http::Server* g_server = nullptr;
-
-void on_signal(int) {
-    if (g_server != nullptr) {
-        g_server->stop(); // sets a flag; epoll_wait returns via EINTR
-    }
-}
+// Lock stripes for the shared local limiter (design 0.20). Many more stripes
+// than threads, so two busy keys rarely share a lock; each stripe costs one
+// mutex and one small key store.
+constexpr std::size_t kShardCount = 64;
 
 void print_usage(const char* argv0) {
     std::cerr << "usage: " << argv0 << " [options]\n"
@@ -63,25 +68,39 @@ int parse_int(std::string_view s, const char* what) {
     return out;
 }
 
+/// One single-threaded local limiter holding at most `max_keys` keys.
+std::unique_ptr<rl::limit::RateLimiter> make_local_limiter(const rl::core::Config& base,
+                                                           const rl::core::LimiterConfig& lc,
+                                                           const rl::core::Clock& clock,
+                                                           std::size_t max_keys) {
+    if (lc.algo == rl::core::LimiterConfig::Algo::token_bucket) {
+        return std::make_unique<rl::limit::TokenBucketLimiter>(lc.rate, lc.burst, clock, max_keys,
+                                                               base.key_store.idle_ttl);
+    }
+    return std::make_unique<rl::limit::SlidingWindowLimiter>(lc.limit, lc.window, clock, max_keys,
+                                                             base.key_store.idle_ttl);
+}
+
 // Build a limiter for `lc`, taking non-algorithm settings (mode, key-store
-// bounds, redis endpoint) from `base`. Called once at startup and again by the
-// server for every accepted POST /config (design 0.19).
+// bounds, redis endpoint, thread count) from `base`. Called at startup (once
+// per thread in redis mode) and by the server for every accepted POST /config
+// (design 0.19, 0.20).
 std::unique_ptr<rl::limit::RateLimiter> make_limiter(const rl::core::Config& base,
                                                      const rl::core::LimiterConfig& lc,
                                                      const rl::core::Clock& clock,
                                                      rl::core::Stats& stats) {
-    using rl::core::Config;
-    using rl::core::LimiterConfig;
-
-    if (base.mode == Config::Mode::redis) {
+    if (base.mode == rl::core::Config::Mode::redis) {
+        // hiredis contexts are not thread-safe: every worker gets its own.
         return std::make_unique<rl::redis::RedisRateLimiter>(base.redis, lc.rate, lc.burst, stats);
     }
-    if (lc.algo == LimiterConfig::Algo::token_bucket) {
-        return std::make_unique<rl::limit::TokenBucketLimiter>(
-            lc.rate, lc.burst, clock, base.key_store.max_keys, base.key_store.idle_ttl);
+    if (base.server.threads == 1) {
+        return make_local_limiter(base, lc, clock, base.key_store.max_keys);
     }
-    return std::make_unique<rl::limit::SlidingWindowLimiter>(
-        lc.limit, lc.window, clock, base.key_store.max_keys, base.key_store.idle_ttl);
+    // Several threads share one limiter: lock-striped, and each stripe gets its
+    // share of max_keys so the total stays (about) the configured bound.
+    const std::size_t per_shard = (base.key_store.max_keys + kShardCount - 1) / kShardCount;
+    return std::make_unique<rl::limit::ShardedLimiter>(
+        kShardCount, [&] { return make_local_limiter(base, lc, clock, per_shard); });
 }
 
 } // namespace
@@ -148,26 +167,74 @@ int main(int argc, char** argv) {
                                                 &stats](const rl::core::LimiterConfig& lc) {
         return make_limiter(cfg, lc, clock, stats);
     };
-    auto limiter = limiter_factory(cfg.limiter);
 
     std::signal(SIGPIPE, SIG_IGN);
 
-    try {
-        rl::http::Server server(cfg, std::move(limiter), limiter_factory, stats);
-        g_server = &server;
-        std::signal(SIGINT, on_signal);
-        std::signal(SIGTERM, on_signal);
+    // Block SIGINT/SIGTERM before any thread exists: new threads inherit the
+    // mask, so no worker is ever interrupted and the signal stays pending until
+    // the main thread collects it with sigwait() below (design 0.20).
+    sigset_t stop_signals;
+    sigemptyset(&stop_signals);
+    sigaddset(&stop_signals, SIGINT);
+    sigaddset(&stop_signals, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &stop_signals, nullptr);
 
-        const char* mode = (cfg.mode == rl::core::Config::Mode::redis) ? "redis" : "local";
-        std::cerr << "ratelimiter listening on " << cfg.server.host << ":" << cfg.server.port
-                  << " mode=" << mode << "\n";
-        server.run();
-        g_server = nullptr;
+    // Build every Server on this thread so a startup failure (bind, redis
+    // config) is reported before anything runs.
+    std::vector<std::unique_ptr<rl::http::Server>> servers;
+    try {
+        std::shared_ptr<rl::limit::RateLimiter> shared;
+        if (cfg.mode == rl::core::Config::Mode::local) {
+            shared = limiter_factory(cfg.limiter);
+        }
+        for (int i = 0; i < cfg.server.threads; ++i) {
+            std::shared_ptr<rl::limit::RateLimiter> limiter =
+                shared ? shared
+                       : std::shared_ptr<rl::limit::RateLimiter>(limiter_factory(cfg.limiter));
+            servers.push_back(std::make_unique<rl::http::Server>(cfg, std::move(limiter),
+                                                                 limiter_factory, stats,
+                                                                 /*run_sweeper=*/i == 0));
+        }
     } catch (const std::exception& e) {
         std::cerr << "fatal: " << e.what() << "\n";
         return 1;
     }
 
+    const char* mode = (cfg.mode == rl::core::Config::Mode::redis) ? "redis" : "local";
+    std::cerr << "ratelimiter listening on " << cfg.server.host << ":" << cfg.server.port
+              << " mode=" << mode << " threads=" << cfg.server.threads << "\n";
+
+    // A worker whose loop dies sends SIGTERM to the process, so main wakes up
+    // and shuts everything down instead of serving on fewer threads.
+    std::atomic<int> exit_code{0};
+    std::vector<std::thread> workers;
+    try {
+        for (auto& server : servers) {
+            workers.emplace_back([&exit_code, srv = server.get()] {
+                try {
+                    srv->run();
+                } catch (const std::exception& e) {
+                    std::cerr << "fatal: worker: " << e.what() << "\n";
+                    exit_code.store(1);
+                    ::kill(::getpid(), SIGTERM);
+                }
+            });
+        }
+    } catch (const std::exception& e) { // std::thread could not be created
+        std::cerr << "fatal: " << e.what() << "\n";
+        exit_code.store(1);
+        ::kill(::getpid(), SIGTERM);
+    }
+
+    int sig = 0;
+    sigwait(&stop_signals, &sig);
+    for (auto& server : servers) {
+        server->stop(); // atomic flag + eventfd write: wakes that thread's epoll_wait
+    }
+    for (auto& w : workers) {
+        w.join();
+    }
+
     std::cerr << "ratelimiter stopped\n";
-    return 0;
+    return exit_code.load();
 }
