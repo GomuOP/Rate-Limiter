@@ -83,6 +83,7 @@ add_library(rl_core STATIC
     src/core/stats.cpp
     src/limit/token_bucket.cpp
     src/limit/sliding_window.cpp
+    src/limit/sharded_limiter.cpp
     src/limit/key_extractor.cpp
     src/net/event_loop.cpp
     src/net/listener.cpp
